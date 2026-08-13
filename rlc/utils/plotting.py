@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 if TYPE_CHECKING:
-    from rlc.envs.fogofwar import MicrobeGridEnv
+    from rlc.envs.fogofwar import FogGridEnv
     from rlc.agents.q_learning import QLearningAgent
     from rlc.utils.training import TrainingHistory
 
@@ -120,7 +120,7 @@ _ARROW_DELTA = {
 
 def plot_grid_policy_and_values(
     agent: "QLearningAgent",
-    env: "MicrobeGridEnv",
+    env: "FogGridEnv",
     *,
     figsize: tuple[float, float] = (10, 4),
     cmap: str = "viridis",
@@ -156,12 +156,15 @@ def plot_grid_policy_and_values(
     values = agent.state_values().reshape(H, W)
     policy = agent.greedy_policy().reshape(H, W)
 
-    # Mask toxic and goal cells out of the value heatmap.
+    # Mask obstacle and goal tiles
     mask = np.zeros((H, W), dtype=bool)
-    for (r, c) in env.toxic_cells:
+
+    for (r, c) in env.obstacle_tiles:
         mask[r, c] = True
+
     gr, gc = env.goal_pos
     mask[gr, gc] = True
+
     values_masked = np.ma.array(values, mask=mask)
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -171,14 +174,42 @@ def plot_grid_policy_and_values(
     cbar = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
     cbar.set_label(r"$V(s) = \max_a Q(s,a)$")
 
-    # Highlight toxic cells (purple) and goal (green); mark start with a square.
-    for (r, c) in env.toxic_cells:
-        ax.add_patch(plt.Rectangle((c - 0.5, r - 0.5), 1, 1,
-                                   facecolor="#8c2a8c", edgecolor="black",
-                                   linewidth=0.5))
-    ax.add_patch(plt.Rectangle((gc - 0.5, gr - 0.5), 1, 1,
-                               facecolor="#338c33", edgecolor="black",
-                               linewidth=0.5))
+    # highlight obstacles
+    for (r, c) in env.obstacle_tiles:
+        ax.add_patch(
+            plt.Rectangle(
+                (c - 0.5, r - 0.5),1,1,
+                facecolor="#444444",
+                edgecolor="black",
+                linewidth=0.5,
+            )
+        )
+
+    # highlight traps
+    for (r, c) in env.trap_tiles:
+        ax.add_patch(
+            plt.Rectangle(
+                (c - 0.5, r - 0.5),1,1,
+                facecolor="#b33a3a",
+                edgecolor="black",
+                linewidth=0.5,
+                alpha=0.6,
+            )
+        )
+
+    # highlight goal
+    ax.add_patch(
+        plt.Rectangle(
+            (gc - 0.5, gr - 0.5),
+            1,
+            1,
+            facecolor="#338c33",
+            edgecolor="black",
+            linewidth=0.5,
+        )
+    )
+    
+    # highlight start
     sr, sc = env.start_pos
     ax.add_patch(plt.Rectangle((sc - 0.5, sr - 0.5), 1, 1,
                                fill=False, edgecolor="white", linewidth=2.0))
@@ -186,20 +217,33 @@ def plot_grid_policy_and_values(
     # Greedy policy arrows on free cells only.
     for r in range(H):
         for c in range(W):
-            if mask[r, c] or (r, c) == env.start_pos and (r, c) in env.toxic_cells:
+            # if obstacle, then can't agent can't do anything
+            if (r, c) in env.obstacle_tiles:
                 continue
             if (r, c) == env.goal_pos:
                 continue
-            if (r, c) in env.toxic_cells:
-                continue
+
             dx, dy = _ARROW_DELTA[int(policy[r, c])]
-            ax.arrow(c, r, dx * 0.3, -dy * 0.3,  # invert dy: imshow rows go down
-                     head_width=0.18, head_length=0.18,
-                     fc=arrow_color, ec=arrow_color, length_includes_head=True)
+
+            ax.arrow(c, r,
+                dx * 0.3, -dy * 0.3,
+                head_width=0.18,
+                head_length=0.18,
+                fc=arrow_color,
+                ec=arrow_color,
+                length_includes_head=True,
+            )
+
             if annotate_values:
-                ax.text(c, r + 0.35, f"{values[r, c]:.0f}",
-                        ha="center", va="center",
-                        color=arrow_color, fontsize=7)
+                ax.text(
+                    c,
+                    r + 0.35,
+                    f"{values[r, c]:.0f}",
+                    ha="center",
+                    va="center",
+                    color=arrow_color,
+                    fontsize=7,
+                )
 
     ax.set_xticks(range(W))
     ax.set_yticks(range(H))
@@ -217,7 +261,7 @@ def plot_grid_policy_and_values(
 
 def plot_state_visits(
     state_action_counts: np.ndarray,
-    env: "MicrobeGridEnv",
+    env: "FogGridEnv",
     *,
     figsize: tuple[float, float] = (10, 4),
     cmap: str = "magma",
@@ -296,7 +340,7 @@ _ACTION_NAMES = {0: "up", 1: "right", 2: "down", 3: "left"}
 
 def plot_state_action_visits(
     state_action_counts: np.ndarray,
-    env: "MicrobeGridEnv",
+    env: "FogGridEnv",
     *,
     figsize: tuple[float, float] = (12, 6),
     cmap: str = "magma",
