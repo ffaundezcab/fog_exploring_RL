@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 if TYPE_CHECKING:
-    from rlc.envs.microbe import MicrobeGridEnv
+    from rlc.envs.fogofwar import MicrobeGridEnv
     from rlc.agents.q_learning import QLearningAgent
     from rlc.utils.training import TrainingHistory
 

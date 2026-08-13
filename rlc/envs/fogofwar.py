@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import numpy as np
+from collections import deque
 import gymnasium as gym
 from gymnasium import spaces
 
@@ -66,6 +67,9 @@ class FogGridEnv(gym.Env):
         step_cost: float = -1.0,
         trap_penalty: float = -15.0,
         goal_reward: float = 100.0,
+        randomize_map: bool = False,
+        obstacle_density: float = 0.15,
+        trap_density: float = 0.1,
         render_mode: Optional[str] = None,
     ) -> None:
         super().__init__()
@@ -83,6 +87,9 @@ class FogGridEnv(gym.Env):
         self.goal_pos = tuple(goal_pos)
         self.trap_tiles = set(map(tuple, trap_tiles))
         self.obstacle_tiles = set(map(tuple, obstacle_tiles))
+        self.randomize_map = bool(randomize_map)
+        self.obstacle_density = float(obstacle_density)
+        self.trap_density = float(trap_density)
         
         # agent config
         self.vision_radius = int(vision_radius)
@@ -115,6 +122,12 @@ class FogGridEnv(gym.Env):
         def in_bounds(pos: tuple[int, int]) -> bool:
             r, c = pos
             return 0 <= r < self.height and 0 <= c < self.width
+        
+        if not 0.0 <= self.obstacle_density < 1.0:
+            raise ValueError("obstacle_density must be between 0 and 1")
+        
+        if not 0.0 <= self.trap_density < 1.0:
+            raise ValueError("trap_density must be between 0 and 1")
         
         if self.vision_radius < 0:
             raise ValueError("vision_radius must be >= 0")
@@ -150,6 +163,68 @@ class FogGridEnv(gym.Env):
         if self.obstacle_tiles & self.trap_tiles:
             raise ValueError("tile cannot be an obstacle and a trap at the same time.")
 
+    def _generate_random_map(self) -> None:
+        while True:
+            # all available tiles: not start or goal tiles
+            all_tiles = [
+                (r, c)
+                for r in range(self.height)
+                for c in range(self.width)
+                if (r, c) not in {self.start_pos, self.goal_pos}
+            ]
+
+            n_available = len(all_tiles)
+
+            # based on the previously defined density how many of each should we have
+            n_obstacles = int(self.obstacle_density*n_available)
+            n_traps = int(self.trap_density*n_available)
+
+            # shuffle all available tiles
+            shuffled = self.np_random.permutation(len(all_tiles))
+
+            # take the first n_obstacles as obstacle tiles
+            obstacle_idx = shuffled[:n_obstacles]
+            
+            # then the same for trap tiles
+            trap_idx = shuffled[n_obstacles:n_obstacles + n_traps]
+
+            # define them as a passable dict
+            self.obstacle_tiles = {
+                all_tiles[i] for i in obstacle_idx
+            }
+
+            self.trap_tiles = {
+                all_tiles[i] for i in trap_idx
+            }
+            
+            if self._has_path_to_goal():
+                break
+        
+    def _has_path_to_goal(self) -> bool:
+        # BFS algorithm for finding if there's any path to the goal state
+        queue = deque([self.start_pos])
+        visited = {self.start_pos}
+
+        while queue:
+            pos = queue.popleft()
+
+            if pos == self.goal_pos:
+                return True
+
+            # at each position, ask which tiles are reachable within 1 step (in all directions)
+            for action in range(4):
+                nxt = self._intended_landing(pos, action)
+                
+                # if obstacle then continue to the next action
+                if nxt in self.obstacle_tiles:
+                    continue
+                # if state wasn't visited, then record it and continue exploring
+                if nxt not in visited:
+                    visited.add(nxt)
+                    queue.append(nxt)
+
+        return False
+    
     def _pos_to_obs(self, pos: tuple[int, int]) -> int:
         """Row-major flattening: s = row * width + col."""
         return pos[0] * self.width + pos[1]
@@ -164,17 +239,21 @@ class FogGridEnv(gym.Env):
     # ---------------------------------------------------------------------
     # Gymnasium API
     # ---------------------------------------------------------------------
-
     def reset(
         self,
         *,
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
-    ) -> tuple[int, dict[str, Any]]:
+    ):
         super().reset(seed=seed)
+
+        if self.randomize_map:
+            self._generate_random_map()
+
         self._agent_pos = self.start_pos
         self._episode_return = 0.0
         obs = self._pos_to_obs(self._agent_pos)
+
         return obs, {}
 
     def step(self, action: int) -> tuple[int, float, bool, bool, dict[str, Any]]:
@@ -289,3 +368,29 @@ class FogGridEnv(gym.Env):
     def close(self) -> None:
         # No external resources to release.
         pass
+    
+    def print_map(self) -> None:
+        """
+        simple text representation of the map
+        """
+        for r in range(self.height):
+            row = []
+            for c in range(self.width):
+                pos = (r, c)
+
+                if pos == self._agent_pos:
+                    symbol = "A"
+                elif pos == self.start_pos:
+                    symbol = "S"
+                elif pos == self.goal_pos:
+                    symbol = "G"
+                elif pos in self.obstacle_tiles:
+                    symbol = "O"
+                elif pos in self.trap_tiles:
+                    symbol = "X"
+                else:
+                    symbol = "."
+
+                row.append(symbol)
+
+            print(" ".join(row))
