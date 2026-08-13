@@ -70,6 +70,7 @@ class FogGridEnv(gym.Env):
         randomize_map: bool = False,
         obstacle_density: float = 0.15,
         trap_density: float = 0.1,
+        local_view: bool = False,
         render_mode: Optional[str] = None,
     ) -> None:
         super().__init__()
@@ -90,6 +91,8 @@ class FogGridEnv(gym.Env):
         self.randomize_map = bool(randomize_map)
         self.obstacle_density = float(obstacle_density)
         self.trap_density = float(trap_density)
+        self.vision_radius = int(vision_radius)
+        self.local_view = bool(local_view)
         
         # agent config
         self.vision_radius = int(vision_radius)
@@ -101,7 +104,19 @@ class FogGridEnv(gym.Env):
 
         # actions
         self.action_space = spaces.Discrete(4)
-        self.observation_space = spaces.Discrete(self.height * self.width)
+        
+        # depending on local view obs space changes
+        n_visible_cells = (2*self.vision_radius + 1)**2 # a square with two tiles distance from agent pos
+        
+        if not self.local_view:
+            self.observation_space = spaces.Discrete(self.height * self.width)
+        else:
+            # this is where the state space explosion happens
+            # having a local view with 2 tiles to any direction can increase the number of states the agent stores
+            # given the nature of our random map generation many of these states will be visited very few
+            self.observation_space = spaces.Tuple((spaces.Discrete(self.height),
+                                                   spaces.Discrete(self.width),
+                                                   *[spaces.Discrete(5) for _ in range(n_visible_cells)],))
 
         if render_mode is not None and render_mode not in self.metadata["render_modes"]:
             raise ValueError(
@@ -225,9 +240,51 @@ class FogGridEnv(gym.Env):
 
         return False
     
+    def _get_local_view(self) -> tuple[int, ...]:
+        if self._agent_pos is None:
+            raise RuntimeError
+        
+        ar, ac = self._agent_pos
+        view = []
+        
+        for dr in range(-self.vision_radius, self.vision_radius+1):
+            for dc in range(-self.vision_radius, self.vision_radius +1):
+                
+                r = ar + dr
+                c = ac + dc
+                pos = (r,c)
+                
+                if not (0 <= r < self.height and 0 <= c < self.width):
+                    tile = FOG
+                elif pos in self.obstacle_tiles:
+                    tile = OBSTACLE
+                elif pos in self.obstacle_tiles:
+                    tile = TRAP
+                elif pos == self.goal_pos:
+                    tile = GOAL
+                else:
+                    tile = EMPTY
+        
+        return tuple(view)
+        
+        
+    
     def _pos_to_obs(self, pos: tuple[int, int]) -> int:
         """Row-major flattening: s = row * width + col."""
         return pos[0] * self.width + pos[1]
+    
+    def _get_obs(self):
+        if self._agent_pos is None:
+            raise RuntimeError("Observation needed before reset")
+        
+        # if local view is not activated for the env
+        if not self.local_view:
+            return self._pos_to_obs(self._agent_pos)
+        
+        r,c = self._agent_pos
+        local_view = self._get_local_view()
+        
+        return (r,c, *local_view)
 
     def _intended_landing(self, pos: tuple[int, int], action: int) -> tuple[int, int]:
         """Apply action displacement, clipping at grid boundaries."""
@@ -252,7 +309,8 @@ class FogGridEnv(gym.Env):
 
         self._agent_pos = self.start_pos
         self._episode_return = 0.0
-        obs = self._pos_to_obs(self._agent_pos)
+        
+        obs = self._get_obs()
 
         return obs, {}
 
@@ -284,7 +342,7 @@ class FogGridEnv(gym.Env):
         truncated = False
         
         self._episode_return += reward
-        obs = self._pos_to_obs(self._agent_pos)
+        obs = self._get_obs()
         info = {}
         return obs, reward, terminated, truncated, info
 
