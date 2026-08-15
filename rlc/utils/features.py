@@ -19,6 +19,13 @@ from typing import Protocol
 
 import numpy as np
 
+# Tile types
+EMPTY = 0
+OBSTACLE = 1
+TRAP = 2
+GOAL = 3
+FOG = 4
+
 
 # ---------------------------------------------------------------------------
 # Structural interface
@@ -35,7 +42,6 @@ class FeatureExtractor(Protocol):
     n_features: int
 
     def __call__(self, state: np.ndarray) -> np.ndarray: ...
-
 
 # ---------------------------------------------------------------------------
 # Tile coding
@@ -212,3 +218,132 @@ class RBFFeatures:
                 feat = feat / total
         return feat
 
+class LocalQuadrantFeatures:
+    """
+    """
+    
+    def __init__(self,
+                 height: int,
+                 width: int,
+                 vision_radius: int = 2,
+                 exp_decay: float = 1.0) -> None:
+        if vision_radius != 2:
+            raise ValueError("vision radius must start at 2 tiles")
+        
+        self.height = height
+        self.width = width
+        self.vision_radius = vision_radius
+        self.exp_decay = exp_decay
+        
+        # bias term, agent pos, features per quadrant (6 x 4)
+        self.n_features = 27
+        
+        # quadrants relative to the position of the agent
+        
+        self.quadrants = {
+            "north": [(-2,-1), (-2,0), (-2, 1), (-2,2),
+                                        (-1, 0), (-1, 1)],
+            "east": [(-1, 2), (0, 2), (1, 2), (2, 2),
+                                        (0,1), (1,1)],
+            "south": [(2,1), (2,0), (2,-1), (2,-2),
+                                    (1,0), (1,-1)],
+            "west": [(1, -2), (0, -2), (-1, -2), (-2,-2),
+                                        (0, -1), (-1,-1)]            
+        }
+        
+    def __call__(self, state) -> np.ndarray:
+        """
+        """
+        
+        r = state[0]
+        c = state[1]
+        
+        norm_r = r/(self.height - 1)
+        norm_c = c/(self.width - 1)
+        
+        # reconstruct the local view from a flattened matrix
+        local_view = np.asarray(state[2:], dtype = np.int64).reshape(5,5) 
+        
+        # bias + everything else
+        features = [
+            1.0,
+            norm_r,
+            norm_c
+        ]
+        
+        # quadrant features
+        
+        for list_offsets in self.quadrants.values():
+            
+            tiles = []
+            
+            trap_distances = []
+            obstacle_distances = []
+            
+            # depending on which direction (e.g. nort, east, etc...)
+            for dr, dc in list_offsets:
+                
+                # we assume agent is in the middle of the 5x5 local view (coordinates (2,2))
+                # since we stored the delta distance to the agent, we sum up to have the true position
+                # in the local view
+                
+                r = 2+dr
+                c = 2+ dc
+                
+                tile = local_view[r, c]
+                tiles.append(tile)
+                
+                # number of tiles relative to the agent to arrive there
+                distance = abs(dr) + abs(dc)
+                
+                if tile == TRAP:
+                    trap_distances.append(distance)
+                    
+                elif tile == OBSTACLE:
+                    obstacle_distances.append(distance)
+                    
+            tiles = np.asarray(tiles)
+
+            trap_density = np.mean(tiles == TRAP)
+            obstacle_density= np.mean(tiles == OBSTACLE)
+            
+            trap_proximity_index = self._proximity_index(trap_distances)
+            obstacle_proximity_index = self._proximity_index(obstacle_distances)
+            
+            clear_path = 0.0
+            
+            features.extend([trap_density,
+                             obstacle_density,
+                             trap_proximity_index,
+                             obstacle_proximity_index,
+                             clear_path])
+            
+        # goal in view
+        
+        goal_positions = np.argwhere(local_view == GOAL)
+        
+        if len(goal_positions) == 0:
+            goal_in_view = 0.0
+            goal_r = 0,0
+            goal_c = 0,0
+                    
+                    
+    def _proximity_index(self, distances: list[int]) -> float:
+        """
+        """
+        
+        if not distances:
+            return 0.0
+        
+        product = 1.0
+        
+        for d in distances:
+            contribution = np.exp(-self.exp_decay*(d-1))
+            add_product *= (1.0 - contribution)
+            
+        return 1.0 - product
+                
+        
+        
+    
+    

@@ -264,6 +264,8 @@ class FogGridEnv(gym.Env):
                     tile = GOAL
                 else:
                     tile = EMPTY
+                    
+                view.append(tile)
         
         return tuple(view)
         
