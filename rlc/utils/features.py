@@ -235,8 +235,8 @@ class LocalQuadrantFeatures:
         self.vision_radius = vision_radius
         self.exp_decay = exp_decay
         
-        # bias term, agent pos, features per quadrant (6 x 4)
-        self.n_features = 27
+        # bias term, agent pos, features per quadrant (5 x 4)
+        self.n_features = 26
         
         # quadrants relative to the position of the agent
         
@@ -255,11 +255,19 @@ class LocalQuadrantFeatures:
         """
         """
         
-        r = state[0]
-        c = state[1]
+        agent_r = state[0]
+        agent_c = state[1]
         
-        norm_r = r/(self.height - 1)
-        norm_c = c/(self.width - 1)
+        norm_r = agent_r/(self.height - 1)
+        norm_c = agent_c/(self.width - 1)
+        
+        #check tiles
+        
+        # 5x5 square, 
+        expected_tiles = (2*self.vision_radius+1)**2
+        
+        if len(state[2:]) != expected_tiles:
+            raise ValueError("expected tiles are not equal to given local view")
         
         # reconstruct the local view from a flattened matrix
         local_view = np.asarray(state[2:], dtype = np.int64).reshape(5,5) 
@@ -270,7 +278,6 @@ class LocalQuadrantFeatures:
             norm_r,
             norm_c
         ]
-        
         # quadrant features
         
         for list_offsets in self.quadrants.values():
@@ -286,11 +293,12 @@ class LocalQuadrantFeatures:
                 # we assume agent is in the middle of the 5x5 local view (coordinates (2,2))
                 # since we stored the delta distance to the agent, we sum up to have the true position
                 # in the local view
+                # correct terminology for no confusion
                 
-                r = 2+dr
-                c = 2+ dc
+                view_r = 2+dr
+                view_c = 2+ dc
                 
-                tile = local_view[r, c]
+                tile = local_view[view_r, view_c]
                 tiles.append(tile)
                 
                 # number of tiles relative to the agent to arrive there
@@ -324,8 +332,23 @@ class LocalQuadrantFeatures:
         
         if len(goal_positions) == 0:
             goal_in_view = 0.0
-            goal_r = 0,0
-            goal_c = 0,0
+            goal_dr = 0.0 # deltas
+            goal_dc = 0.0
+            
+        else:
+            goal_in_view = 1.0
+            
+            goal_r, goal_c = goal_positions[0]
+            
+            goal_dr = (goal_r -2)/2 # delta position
+            goal_dc = (goal_c -2)/2 # delta position
+            
+        features.extend([goal_in_view,
+                         goal_dr,
+                         goal_dc])
+        
+        return np.asarray(features, dtype=np.float64)
+            
                     
                     
     def _proximity_index(self, distances: list[int]) -> float:
@@ -335,13 +358,13 @@ class LocalQuadrantFeatures:
         if not distances:
             return 0.0
         
-        product = 1.0
+        add_product = 1.0
         
         for d in distances:
             contribution = np.exp(-self.exp_decay*(d-1))
             add_product *= (1.0 - contribution)
             
-        return 1.0 - product
+        return 1.0 - add_product
                 
         
         
