@@ -236,7 +236,7 @@ class LocalQuadrantFeatures:
         self.exp_decay = exp_decay
         
         # bias term, agent pos, features per quadrant (5 x 4)
-        self.n_features = 26
+        self.n_features = 30
         
         # quadrants relative to the position of the agent
         
@@ -270,13 +270,24 @@ class LocalQuadrantFeatures:
             raise ValueError("expected tiles are not equal to given local view")
         
         # reconstruct the local view from a flattened matrix
-        local_view = np.asarray(state[2:], dtype = np.int64).reshape(5,5) 
+        local_view = np.asarray(state[2:], dtype = np.int64).reshape(5,5)
+        
+        # blocked tiles (OOB)
+        # remember, agent is in the (2,2) position in the squared local view
+        blocked_up = float(local_view[1,2] in (OBSTACLE, FOG))
+        blocked_right = float(local_view[2,3] in (OBSTACLE, FOG))
+        blocked_down = float(local_view[3,2] in (OBSTACLE, FOG))
+        blocked_left = float(local_view[2,1] in (OBSTACLE, FOG))
         
         # bias + everything else
         features = [
             1.0,
             norm_r,
-            norm_c
+            norm_c,
+            blocked_up,
+            blocked_right,
+            blocked_down,
+            blocked_left
         ]
         # quadrant features
         

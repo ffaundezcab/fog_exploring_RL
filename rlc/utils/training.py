@@ -58,6 +58,10 @@ class TrainingHistory:
         Mean return over the evaluation batch, one entry per eval_episodes.
     eval_std_returns : list of float
         Standard deviation of the return over the evaluation batch.
+    eval_success_rate : list of float
+        Value of the proportion of successful runs (agent reached the goal state)
+    eval_mean_len: 
+    
     """
 
     episode_returns: list[float] = field(default_factory=list)
@@ -66,6 +70,8 @@ class TrainingHistory:
     eval_episodes: list[int] = field(default_factory=list)
     eval_mean_returns: list[float] = field(default_factory=list)
     eval_std_returns: list[float] = field(default_factory=list)
+    eval_success_rate: list[float] = field(default_factory=list)
+    eval_mean_len: list[float] = field(default_factory=list)
 
 
 def evaluate(
@@ -106,6 +112,8 @@ def evaluate(
         Array of shape ``(n_episodes,)`` with the individual returns.
     """
     returns = np.zeros(n_episodes, dtype=np.float64)
+    lens = np.zeros(n_episodes, dtype = np.int64)
+    success = np.zeros(n_episodes, dtype=np.float64)
 
     for ep in range(n_episodes):
         obs, _ = env.reset(seed=seed if ep == 0 else None)
@@ -121,8 +129,10 @@ def evaluate(
             if max_steps is not None and steps >= max_steps:
                 break
         returns[ep] = ep_return
+        lens[ep] = steps
+        success[ep] = float(terminated) # since true/false converts to 1 or 0
 
-    return float(returns.mean()), float(returns.std()), returns
+    return float(returns.mean()), float(returns.std()), returns, float(success.mean()), float(lens.mean())
 
 
 def train(
@@ -233,7 +243,7 @@ def train(
             (ep + 1) % eval_every == 0 or (ep + 1) == n_episodes
         )
         if is_eval_step:
-            mean_ret, std_ret, _ = evaluate(
+            mean_ret, std_ret, _ , success_rate, mean_len = evaluate(
                 agent, eval_env,
                 n_episodes=eval_episodes,
                 max_steps=eval_max_steps,
@@ -241,5 +251,8 @@ def train(
             history.eval_episodes.append(ep + 1)
             history.eval_mean_returns.append(mean_ret)
             history.eval_std_returns.append(std_ret)
+            history.eval_success_rate.append(success_rate)
+            history.eval_mean_len.append(mean_len)
+            
 
     return history
