@@ -17,20 +17,21 @@ import numpy as np
 
 from collections import defaultdict
 from typing import Hashable, Optional
+from rlc.utils.features import LocalQuadrantFeatures
         
-class LocalQLearningAgent:
+class LFAQLearningAgent:
     """
     """
 
     def __init__(
         self,
         n_actions: int,
+        feature_extractor: LocalQuadrantFeatures,
         alpha: float = 0.1,
         gamma: float = 1.0,
         epsilon_start: float = 1.0,
         epsilon_min: float = 0.05,
         epsilon_decay: float = 0.995,
-        initial_q: float = 0.0,
         seed: Optional[int] = None,
     ) -> None:
         if not 0.0 < alpha <= 1.0:
@@ -46,12 +47,13 @@ class LocalQLearningAgent:
             raise ValueError(f"epsilon_decay must be in (0, 1], got {epsilon_decay}.")
 
         self.n_actions = int(n_actions)
+        self.feature_extractor = feature_extractor
+        
         self.alpha = float(alpha)
         self.gamma = float(gamma)
         self.epsilon_start = float(epsilon_start)
         self.epsilon_min = float(epsilon_min)
         self.epsilon_decay = float(epsilon_decay)
-        self.initial_q = float(initial_q)
 
         # Current epsilon (decayed across episodes).
         self.epsilon = self.epsilon_start
@@ -59,14 +61,17 @@ class LocalQLearningAgent:
         # Internal RNG, separate from the environment's RNG.
         self._rng = np.random.default_rng(seed)
         
-        self.Q = defaultdict(self._new_q_values)
         
-    def _new_q_values(self) -> np.ndarray:
-        return np.full(
+        # instead of a tabular state-action, we record action x feature weights
+        self.weights = np.zeros((
             self.n_actions,
-            self.initial_q,
-            dtype=np.float64,
-        )
+            self.feature_extractor.n_features
+        ), dtype = np.float64)
+        
+    def _q_values(self, state) -> np.ndarray:
+        phi = self.feature_extractor(state)
+        
+        return self.weights @ phi
 
     # ---------------------------------------------------------------------
     # Action selection
@@ -77,15 +82,8 @@ class LocalQLearningAgent:
         """
         if not greedy and self._rng.random() < self.epsilon:
             return int(self._rng.integers(self.n_actions))
-    
-        # if evaluation happens, it is possible to register a new state that wasn't seen during training
-        # this is to only check the values, but not put new values into the defaultdict we created before
-        # idea: measure the number of cases that were in Q and total cases
-        # this percentage could be sueful to show why this approach is not the best
-        if greedy and state not in self.Q:
-            q_values = self._new_q_values()
-        else:
-            q_values = self.Q[state]
+        
+        q_values = self._q_values(state)
             
         return self._argmax_random_tiebreak(q_values)
 
@@ -113,13 +111,24 @@ class LocalQLearningAgent:
     ) -> None:
         """
         """
-        bootstrap = 0.0 if terminated else float(self.Q[next_state].max())
         
-        td_target = reward + self.gamma * bootstrap
+        phi = self.feature_extractor(state)
+        pred_q = float( self.weights[action] @ phi)
         
-        td_error = td_target - self.Q[state][action]
+        if terminated:
+            bootstrap = 0.0
+        else:
+            next_phi = self.feature_extractor(next_state)
+            next_q_values = (self.weights @ next_phi)
+            
+            bootstrap = float(next_q_values.max())
+            
+        # td 
+        td_target = reward + self.gamma*bootstrap
+        td_error = td_target-pred_q
         
-        self.Q[state][action] += self.alpha * td_error
+        # gradient
+        self.weights[action] += self.alpha*td_error*phi
 
     def end_episode(self) -> None:
         """Hook called by the training loop at the end of every episode.
@@ -133,20 +142,13 @@ class LocalQLearningAgent:
     # Convenience views
     # ---------------------------------------------------------------------
 
-    def greedy_policy(self) -> dict[Hashable, int]:
-        """"""
-        return {
-            state: self._argmax_random_tiebreak(q_values)
-            for state, q_values in self.Q.items()
-        }
+    def q_values(self, state) -> np.ndarray:
+        return self._q_values(state)
 
-    def state_values(self) -> dict[Hashable, float]:
+    def state_values(self, state) -> float:
         """"""
-        return {
-        state: float(q_values.max())
-        for state, q_values in self.Q.items()
-        }
+        return float(self._q_values(state).max())
         
     @property
-    def n_visited_states(self) -> int:
-        return len(self.Q)
+    def n_features(self) -> int:
+        return self.feature_extractor.n_features
