@@ -72,6 +72,7 @@ class TrainingHistory:
     eval_std_returns: list[float] = field(default_factory=list)
     eval_success_rate: list[float] = field(default_factory=list)
     eval_mean_len: list[float] = field(default_factory=list)
+    eps_successess: list[float] = field(default_factory=list)
 
 
 def evaluate(
@@ -235,6 +236,8 @@ def train(
 
         history.episode_returns.append(ep_return)
         history.episode_lengths.append(ep_length)
+        history.eps_successess.append(float(terminated))
+        
         if hasattr(agent, "epsilon"):
             history.epsilons.append(float(agent.epsilon))
 
