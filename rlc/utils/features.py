@@ -236,7 +236,7 @@ class LocalQuadrantFeatures:
         self.exp_decay = exp_decay
         
         # bias term, agent pos, features per quadrant (5 x 4)
-        self.n_features = 30
+        self.n_features = 34
         
         # quadrants relative to the position of the agent
         
@@ -330,12 +330,13 @@ class LocalQuadrantFeatures:
             obstacle_proximity_index = self._proximity_index(obstacle_distances)
             
             clear_path = self._clear_path(local_view, list_offsets)
+            open_path = self._open_tiles(agent_r, agent_c, list_offsets)
             
             features.extend([trap_density,
                              obstacle_density,
                              trap_proximity_index,
                              obstacle_proximity_index,
-                             clear_path])
+                             clear_path, open_path])
             
         # goal in view
         
@@ -423,6 +424,38 @@ class LocalQuadrantFeatures:
                 visited.add(next_tile)
                 queue.append(next_tile)
         return 0.0
+    
+    def _open_tiles(self, ar: int, ac: int, offsets: list[tuple[int,int]]) -> float:
+        """
+        """
+        radius = self.vision_radius
+        limit_count = 0
+        edge_count = 0
+        
+        for dr, dc in offsets:
+            # cells only at the edge
+            
+            if abs(dr) != radius and abs(dc) != radius:
+                continue
+            
+            edge_count += 1
+            
+            # move in the same direction
+            step_r = 0 if dr == 0 else int(np.sign(dr))
+            step_c = 0 if dc == 0 else int(np.sign(dc))
+            
+            check_r = ar + dr + step_r
+            check_c = ac + dc + step_c
+            
+            if (0 <= check_r < self.height and 0<= check_c < self.width):
+                limit_count += 1
+                
+        if edge_count == 0:
+            return 0.0
+        
+        return limit_count/edge_count
+        
+        
         
         
         
