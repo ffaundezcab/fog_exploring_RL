@@ -73,6 +73,7 @@ class TrainingHistory:
     eval_success_rate: list[float] = field(default_factory=list)
     eval_mean_len: list[float] = field(default_factory=list)
     eps_successess: list[float] = field(default_factory=list)
+    eval_maps: Optional[list[dict]] = None
 
 
 def generate_eval_maps(env: gym.Env,
@@ -233,8 +234,9 @@ def train(
     
     if eval_map_setting == "fixed":
         fixed_eval_maps = generate_eval_maps(eval_env, n_maps = eval_episodes, seed = eval_map_seed)
-    
     iterator = range(n_episodes)
+    history.eval_maps = fixed_eval_maps
+    
     if progress:
         try:
             from tqdm.auto import tqdm
