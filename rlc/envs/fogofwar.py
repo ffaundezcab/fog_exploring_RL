@@ -134,6 +134,25 @@ class FogGridEnv(gym.Env):
     # ---------------------------------------------------------------------
     # Helpers
     # ---------------------------------------------------------------------
+    
+    def get_layout(self) -> dict:
+        """
+        Get the trap and obstacles positions (layout of the map)
+        """
+        
+        return {"obstacle_tiles": set(self.obstacle_tiles),
+                "trap_tiles": set(self.trap_tiles)}
+        
+    def set_layout(self, layout: dict) -> None:
+        """
+        """
+        
+        self.obstacle_tiles = set(layout["obstacle_tiles"])
+        self.trap_tiles = set(layout["trap_tiles"])
+        
+        self._validate_layout()
+        
+        
 
     def _validate_layout(self) -> None:
         def in_bounds(pos: tuple[int, int]) -> bool:

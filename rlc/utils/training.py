@@ -75,12 +75,35 @@ class TrainingHistory:
     eps_successess: list[float] = field(default_factory=list)
 
 
+def generate_eval_maps(env: gym.Env,
+                       n_maps: int,
+                       *,
+                       seed: Optional[int] = None) -> list[dict]:
+    """
+    """
+    
+    env = getattr(env, "unwrapped", env)
+    
+    if not hasattr(env, "get_layout"):
+        raise ValueError("Has to have get_layout to retrieve a fixed eval set")
+    
+    maps = []
+    
+    for i in range(n_maps):
+        env.reset(seed = seed if i == 0 else None)
+        
+        maps.append(env.get_layout())
+    return maps
+    
+
+
 def evaluate(
     agent: Agent,
     env: gym.Env,
     n_episodes: int = 20,
     *,
     max_steps: Optional[int] = None,
+    eval_maps: Optional[list[dict]] = None,
     seed: Optional[int] = None,
 ) -> tuple[float, float, np.ndarray]:
     """Run a batch of greedy evaluation episodes.
@@ -117,7 +140,20 @@ def evaluate(
     success = np.zeros(n_episodes, dtype=np.float64)
 
     for ep in range(n_episodes):
-        obs, _ = env.reset(seed=seed if ep == 0 else None)
+        if eval_maps is None:
+            obs, _ = env.reset(seed=seed if ep == 0 else None)
+        else:
+            base_env = getattr(env, "unwrapped", env)
+            layout = eval_maps[ep % len(eval_maps)]
+            orand = base_env.randomize_map
+            base_env.radomize_map = False
+            
+            base_env.set_layout(layout)
+            
+            obs, _ = env.reset()
+            
+            base_env.randomize_map = orand
+        
         ep_return = 0.0
         steps = 0
         while True:
@@ -146,6 +182,8 @@ def train(
     eval_episodes: int = 20,
     eval_env: Optional[gym.Env] = None,
     eval_max_steps: Optional[int] = None,
+    eval_map_setting: str = "random",
+    eval_map_seed: Optional[int] = None,
     seed: Optional[int] = None,
     progress: bool = False,
 ) -> TrainingHistory:
@@ -187,7 +225,15 @@ def train(
     """
     history = TrainingHistory()
     eval_env = eval_env if eval_env is not None else env
+    
+    if eval_map_setting not in ("random", "fixed"):
+        raise ValueError("choose either random or fixed")
 
+    fixed_eval_maps = None
+    
+    if eval_map_setting == "fixed":
+        fixed_eval_maps = generate_eval_maps(eval_env, n_maps = eval_episodes, seed = eval_map_seed)
+    
     iterator = range(n_episodes)
     if progress:
         try:
@@ -250,6 +296,7 @@ def train(
                 agent, eval_env,
                 n_episodes=eval_episodes,
                 max_steps=eval_max_steps,
+                eval_maps = fixed_eval_maps
             )
             history.eval_episodes.append(ep + 1)
             history.eval_mean_returns.append(mean_ret)
