@@ -74,6 +74,8 @@ class TrainingHistory:
     eval_mean_len: list[float] = field(default_factory=list)
     eps_successess: list[float] = field(default_factory=list)
     eval_maps: Optional[list[dict]] = None
+    eval_map_returns: list[list[float]] = field(default_factory=list)
+    eval_map_success: list[list[float]] = field(default_factory=list)
 
 
 def generate_eval_maps(env: gym.Env,
@@ -147,7 +149,7 @@ def evaluate(
             base_env = getattr(env, "unwrapped", env)
             layout = eval_maps[ep % len(eval_maps)]
             orand = base_env.randomize_map
-            base_env.radomize_map = False
+            base_env.randomize_map = False
             
             base_env.set_layout(layout)
             
@@ -170,7 +172,7 @@ def evaluate(
         lens[ep] = steps
         success[ep] = float(terminated) # since true/false converts to 1 or 0
 
-    return float(returns.mean()), float(returns.std()), returns, float(success.mean()), float(lens.mean())
+    return float(returns.mean()), float(returns.std()), returns, float(success.mean()), float(lens.mean()), success
 
 
 def train(
@@ -294,7 +296,7 @@ def train(
             (ep + 1) % eval_every == 0 or (ep + 1) == n_episodes
         )
         if is_eval_step:
-            mean_ret, std_ret, _ , success_rate, mean_len = evaluate(
+            mean_ret, std_ret, map_returns, success_rate, mean_len, map_success = evaluate(
                 agent, eval_env,
                 n_episodes=eval_episodes,
                 max_steps=eval_max_steps,
@@ -305,6 +307,8 @@ def train(
             history.eval_std_returns.append(std_ret)
             history.eval_success_rate.append(success_rate)
             history.eval_mean_len.append(mean_len)
+            history.eval_map_returns.append(map_returns.tolist())
+            history.eval_map_success.append(map_success.astype(bool).tolist())
             
 
     return history
