@@ -19,6 +19,13 @@ from typing import Protocol
 
 import numpy as np
 
+# Tile types
+EMPTY = 0
+OBSTACLE = 1
+TRAP = 2
+GOAL = 3
+FOG = 4
+
 
 # ---------------------------------------------------------------------------
 # Structural interface
@@ -35,7 +42,6 @@ class FeatureExtractor(Protocol):
     n_features: int
 
     def __call__(self, state: np.ndarray) -> np.ndarray: ...
-
 
 # ---------------------------------------------------------------------------
 # Tile coding
@@ -212,3 +218,246 @@ class RBFFeatures:
                 feat = feat / total
         return feat
 
+class LocalQuadrantFeatures:
+    """
+    """
+    
+    def __init__(self,
+                 height: int,
+                 width: int,
+                 vision_radius: int = 2,
+                 exp_decay: float = 1.0) -> None:
+        if vision_radius != 2:
+            raise ValueError("vision radius must start at 2 tiles")
+        
+        self.height = height
+        self.width = width
+        self.vision_radius = vision_radius
+        self.exp_decay = exp_decay
+        
+        # bias term, agent pos, features per quadrant (5 x 4)
+        self.n_features = 34
+        
+        # quadrants relative to the position of the agent
+        
+        self.quadrants = {
+            "north": [(-2,-1), (-2,0), (-2, 1), (-2,2),
+                                        (-1, 0), (-1, 1)],
+            "east": [(-1, 2), (0, 2), (1, 2), (2, 2),
+                                        (0,1), (1,1)],
+            "south": [(2,1), (2,0), (2,-1), (2,-2),
+                                    (1,0), (1,-1)],
+            "west": [(1, -2), (0, -2), (-1, -2), (-2,-2),
+                                        (0, -1), (-1,-1)]            
+        }
+        
+    def __call__(self, state) -> np.ndarray:
+        """
+        """
+        
+        agent_r = state[0]
+        agent_c = state[1]
+        
+        norm_r = agent_r/(self.height - 1)
+        norm_c = agent_c/(self.width - 1)
+        
+        #check tiles
+        
+        # 5x5 square, 
+        expected_tiles = (2*self.vision_radius+1)**2
+        
+        if len(state[2:]) != expected_tiles:
+            raise ValueError("expected tiles are not equal to given local view")
+        
+        # reconstruct the local view from a flattened matrix
+        local_view = np.asarray(state[2:], dtype = np.int64).reshape(5,5)
+        
+        # blocked tiles (OOB)
+        # remember, agent is in the (2,2) position in the squared local view
+        blocked_up = float(local_view[1,2] in (OBSTACLE, FOG))
+        blocked_right = float(local_view[2,3] in (OBSTACLE, FOG))
+        blocked_down = float(local_view[3,2] in (OBSTACLE, FOG))
+        blocked_left = float(local_view[2,1] in (OBSTACLE, FOG))
+        
+        # bias + everything else
+        features = [
+            1.0,
+            norm_r,
+            norm_c,
+            blocked_up,
+            blocked_right,
+            blocked_down,
+            blocked_left
+        ]
+        # quadrant features
+        
+        for list_offsets in self.quadrants.values():
+            
+            tiles = []
+            
+            trap_distances = []
+            obstacle_distances = []
+            
+            # depending on which direction (e.g. nort, east, etc...)
+            for dr, dc in list_offsets:
+                
+                # we assume agent is in the middle of the 5x5 local view (coordinates (2,2))
+                # since we stored the delta distance to the agent, we sum up to have the true position
+                # in the local view
+                # correct terminology for no confusion
+                
+                view_r = 2+dr
+                view_c = 2+ dc
+                
+                tile = local_view[view_r, view_c]
+                tiles.append(tile)
+                
+                # number of tiles relative to the agent to arrive there
+                distance = abs(dr) + abs(dc)
+                
+                if tile == TRAP:
+                    trap_distances.append(distance)
+                    
+                elif tile == OBSTACLE:
+                    obstacle_distances.append(distance)
+                    
+            tiles = np.asarray(tiles)
+
+            trap_density = np.mean(tiles == TRAP)
+            obstacle_density= np.mean(tiles == OBSTACLE)
+            
+            trap_proximity_index = self._proximity_index(trap_distances)
+            obstacle_proximity_index = self._proximity_index(obstacle_distances)
+            
+            clear_path = self._clear_path(local_view, list_offsets)
+            open_path = self._open_tiles(agent_r, agent_c, list_offsets)
+            
+            features.extend([trap_density,
+                             obstacle_density,
+                             trap_proximity_index,
+                             obstacle_proximity_index,
+                             clear_path, open_path])
+            
+        # goal in view
+        
+        goal_positions = np.argwhere(local_view == GOAL)
+        
+        if len(goal_positions) == 0:
+            goal_in_view = 0.0
+            goal_dr = 0.0 # deltas
+            goal_dc = 0.0
+            
+        else:
+            goal_in_view = 1.0
+            
+            goal_r, goal_c = goal_positions[0]
+            
+            goal_dr = (goal_r -2)/2 # delta position
+            goal_dc = (goal_c -2)/2 # delta position
+            
+        features.extend([goal_in_view,
+                         goal_dr,
+                         goal_dc])
+        
+        return np.asarray(features, dtype=np.float64)
+            
+                    
+                    
+    def _proximity_index(self, distances: list[int]) -> float:
+        """
+        """
+        
+        if not distances:
+            return 0.0
+        
+        add_product = 1.0
+        
+        for d in distances:
+            contribution = np.exp(-self.exp_decay*(d-1))
+            add_product *= (1.0 - contribution)
+            
+        return 1.0 - add_product
+                
+                
+    def _clear_path(self, local_view: np.ndarray, offsets: list[tuple[int,int]]) -> float:
+        """
+        """
+        
+        # position of the agent in local view
+        center = (2,2)
+        
+        # quadrant coordinates
+        quadrant_tiles = {(2+dr, 2+dc) for dr, dc in offsets}
+        allowed_tiles = quadrant_tiles | {center}
+        
+        # edge tiles (adjacent to an exit)
+        edge_tiles = {(r,c) for r,c in quadrant_tiles if r in (0,4) or c in (0,4)}
+        
+        # BFS algorithm again, to determine possible exit
+        queue = [center]
+        visited = {center}
+        
+        while queue:
+            r,c = queue.pop(0)
+            
+            if (r,c) in edge_tiles:
+                return 1.0
+            
+            # move in each direction
+            for dr, dc in [(-1,0), (0,1), (1,0), (0,-1)]:
+                
+                next_tile = (r+dr, c+dc)
+                
+                # local to the quadrant
+                if next_tile not in allowed_tiles:
+                    continue
+                
+                if next_tile in visited:
+                    continue
+                
+                nr, nc = next_tile
+                tile = local_view[nr, nc]
+                
+                if tile in (OBSTACLE, FOG):
+                    continue
+                
+                visited.add(next_tile)
+                queue.append(next_tile)
+        return 0.0
+    
+    def _open_tiles(self, ar: int, ac: int, offsets: list[tuple[int,int]]) -> float:
+        """
+        """
+        radius = self.vision_radius
+        limit_count = 0
+        edge_count = 0
+        
+        for dr, dc in offsets:
+            # cells only at the edge
+            
+            if abs(dr) != radius and abs(dc) != radius:
+                continue
+            
+            edge_count += 1
+            
+            # move in the same direction
+            step_r = 0 if dr == 0 else int(np.sign(dr))
+            step_c = 0 if dc == 0 else int(np.sign(dc))
+            
+            check_r = ar + dr + step_r
+            check_c = ac + dc + step_c
+            
+            if (0 <= check_r < self.height and 0<= check_c < self.width):
+                limit_count += 1
+                
+        if edge_count == 0:
+            return 0.0
+        
+        return limit_count/edge_count
+        
+        
+        
+        
+        
+    
+    

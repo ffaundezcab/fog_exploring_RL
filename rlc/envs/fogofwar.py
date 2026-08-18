@@ -66,6 +66,7 @@ class FogGridEnv(gym.Env):
         vision_radius: int = 2,
         step_cost: float = -1.0,
         trap_penalty: float = -15.0,
+        obstacle_penalty: float = -5.0,
         goal_reward: float = 100.0,
         randomize_map: bool = False,
         obstacle_density: float = 0.15,
@@ -98,6 +99,7 @@ class FogGridEnv(gym.Env):
         self.vision_radius = int(vision_radius)
         self.step_cost = float(step_cost)
         self.trap_penalty = float(trap_penalty)
+        self.obstacle_penalty = float(obstacle_penalty)
         self.goal_reward = float(goal_reward)
 
         self._validate_layout()
@@ -258,14 +260,31 @@ class FogGridEnv(gym.Env):
                     tile = FOG
                 elif pos in self.obstacle_tiles:
                     tile = OBSTACLE
-                elif pos in self.obstacle_tiles:
+                elif pos in self.trap_tiles:
                     tile = TRAP
                 elif pos == self.goal_pos:
                     tile = GOAL
                 else:
                     tile = EMPTY
+                    
+                view.append(tile)
         
         return tuple(view)
+    
+    def _is_blocked_step(self, pos: tuple[int, int], action: int) -> bool:
+        dr, dc = _DELTA[action]
+        
+        ori_r = pos[0] + dr
+        ori_c = pos[1] + dc
+        
+        # oob condition
+        if not (0 <= ori_r < self.height and 0 <= ori_c < self.width):
+            return True
+        
+        if (ori_r, ori_c) in self.obstacle_tiles:
+            return True
+        
+        return False
         
         
     
@@ -321,29 +340,32 @@ class FogGridEnv(gym.Env):
         if not self.action_space.contains(action):
             raise ValueError(f"Invalid action {action!r}; expected 0..3.")
 
-        landing = self._intended_landing(self._agent_pos, action)
-        if landing in self.obstacle_tiles:
-            # position remains unchanged
-            reward = self.step_cost
+        blocked_tile = False
+        if self._is_blocked_step(self._agent_pos, action):
+            reward = self.obstacle_penalty
             terminated = False
-        elif landing == self.goal_pos:
-            self._agent_pos = landing
-            reward = self.goal_reward
-            terminated = True
-        elif landing in self.trap_tiles:
-            self._agent_pos = landing
-            reward = self.trap_penalty
-            terminated = False
+            blocked_tile = True
+            # position doesn't change if oob or obstacle
         else:
-            self._agent_pos = landing
-            reward = self.step_cost
-            terminated = False
+            landing = self._intended_landing(self._agent_pos, action)
+            if landing == self.goal_pos:
+                self._agent_pos = landing
+                reward = self.goal_reward
+                terminated = True
+            elif landing in self.trap_tiles:
+                self._agent_pos = landing
+                reward = self.trap_penalty
+                terminated = False
+            else:
+                self._agent_pos = landing
+                reward = self.step_cost
+                terminated = False
 
         truncated = False
         
         self._episode_return += reward
         obs = self._get_obs()
-        info = {}
+        info = {"blocked": blocked_tile}
         return obs, reward, terminated, truncated, info
 
     # ---------------------------------------------------------------------
