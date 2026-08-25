@@ -330,7 +330,7 @@ class LocalQuadrantFeatures:
             obstacle_proximity_index = self._proximity_index(obstacle_distances)
             
             clear_path = self._clear_path(local_view, list_offsets)
-            open_path = self._open_tiles(agent_r, agent_c, list_offsets)
+            open_path = self._open_tiles(local_view, list_offsets)
             
             features.extend([trap_density,
                              obstacle_density,
@@ -425,10 +425,11 @@ class LocalQuadrantFeatures:
                 queue.append(next_tile)
         return 0.0
     
-    def _open_tiles(self, ar: int, ac: int, offsets: list[tuple[int,int]]) -> float:
+    def _open_tiles(self, local_view: np.ndarray, offsets: list[tuple[int,int]]) -> float:
         """
         """
         radius = self.vision_radius
+        
         limit_count = 0
         edge_count = 0
         
@@ -441,13 +442,12 @@ class LocalQuadrantFeatures:
             edge_count += 1
             
             # move in the same direction
-            step_r = 0 if dr == 0 else int(np.sign(dr))
-            step_c = 0 if dc == 0 else int(np.sign(dc))
+            view_r = radius + dr
+            view_c = radius + dc
             
-            check_r = ar + dr + step_r
-            check_c = ac + dc + step_c
+            tile = local_view[view_r, view_c]
             
-            if (0 <= check_r < self.height and 0<= check_c < self.width):
+            if tile not in (OBSTACLE, FOG):
                 limit_count += 1
                 
         if edge_count == 0:
