@@ -116,9 +116,7 @@ class FogGridEnv(gym.Env):
             # this is where the state space explosion happens
             # having a local view with 2 tiles to any direction can increase the number of states the agent stores
             # given the nature of our random map generation many of these states will be visited very few
-            self.observation_space = spaces.Tuple((spaces.Discrete(self.height),
-                                                   spaces.Discrete(self.width),
-                                                   *[spaces.Discrete(5) for _ in range(n_visible_cells)],))
+            self.observation_space = spaces.Tuple(tuple(spaces.Discrete(5) for _ in range(n_visible_cells)))
 
         if render_mode is not None and render_mode not in self.metadata["render_modes"]:
             raise ValueError(
@@ -319,10 +317,9 @@ class FogGridEnv(gym.Env):
         if not self.local_view:
             return self._pos_to_obs(self._agent_pos)
         
-        r,c = self._agent_pos
         local_view = self._get_local_view()
         
-        return (r,c, *local_view)
+        return local_view
 
     def _intended_landing(self, pos: tuple[int, int], action: int) -> tuple[int, int]:
         """Apply action displacement, clipping at grid boundaries."""
