@@ -226,7 +226,8 @@ class LocalQuadrantFeatures:
                  height: int,
                  width: int,
                  vision_radius: int = 2,
-                 exp_decay: float = 1.0) -> None:
+                 exp_decay: float = 1.0,
+                 exact_view: bool = False) -> None:
         if vision_radius != 2:
             raise ValueError("vision radius must start at 2 tiles")
         
@@ -234,9 +235,16 @@ class LocalQuadrantFeatures:
         self.width = width
         self.vision_radius = vision_radius
         self.exp_decay = exp_decay
+        self.exact_view = bool(exact_view)
         
         # bias term, agent pos, features per quadrant (5 x 4)
-        self.n_features = 32
+        base_features = 32
+        exact_view_features = 0
+        # 5x5 square, for each 4 types of tiles
+        if self.exact_view:
+            exact_view_features = ((2*self.vision_radius+1)**2*4)
+        
+        self.n_features = base_features+ + exact_view_features
         
         # quadrants relative to the position of the agent
         
@@ -281,6 +289,9 @@ class LocalQuadrantFeatures:
             blocked_down,
             blocked_left
         ]
+        
+        if self.exact_view:
+            features.extend(self._exact_view_features(local_view))
         # quadrant features
         
         for list_offsets in self.quadrants.values():
@@ -353,7 +364,18 @@ class LocalQuadrantFeatures:
         
         return np.asarray(features, dtype=np.float64)
             
-                    
+    def _exact_view_features(self, local_view: np.ndarray) -> list[float]:
+        """
+        
+        """
+        
+        feature_matrix = []
+        
+        for tile in local_view.ravel():
+            feature_matrix.extend([float(tile == OBSTACLE), float(tile == TRAP),
+                                   float(tile == GOAL), float(tile == FOG)])
+        return feature_matrix
+        
                     
     def _proximity_index(self, distances: list[int]) -> float:
         """
