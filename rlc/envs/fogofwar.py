@@ -50,7 +50,27 @@ _PERPENDICULAR = {
 
 
 class FogGridEnv(gym.Env):
-    """
+    """Grid world environment with obstacles, traps, fog, and local observations.
+
+    Parameters
+    ----------
+    height, width : int
+        Grid shape.
+    start_pos, goal_pos : tuple[int, int]
+        Start and goal coordinates.
+    obstacle_tiles, trap_tiles : list[tuple[int, int]], optional
+        Fixed obstacle and trap positions for a specific map configuration
+    vision_radius : int
+        Radius of the local view around the agent.
+    step_cost, trap_penalty, obstacle_penalty, goal_reward : float
+        Rewards or penalties for the corresponding transition outcomes.
+    randomize_map : bool
+        Whether to generate a new map every episode or not.
+    obstacle_density, trap_density : float
+        Proportions of dangers used when generating random maps.
+    local_view : bool
+        Whether observations include the local view instead of only the position of the agent.
+    render_mode : str, optional
     """
 
     metadata = {"render_modes": ["rgb_array"], "render_fps": 4}
@@ -136,6 +156,11 @@ class FogGridEnv(gym.Env):
     def get_layout(self) -> dict:
         """
         Get the trap and obstacles positions (layout of the map)
+        
+        Returns
+        -------
+        dict
+            Contains a list with obstacle and trap tiles position
         """
         
         return {"obstacle_tiles": set(self.obstacle_tiles),
@@ -143,6 +168,14 @@ class FogGridEnv(gym.Env):
         
     def set_layout(self, layout: dict) -> None:
         """
+        Given a specific layout, set the map with the given obstacles and trap positions
+        
+        Parameters
+        ----------
+        
+        layout: dict
+            Contains a list with obstacle and trap tiles position
+        
         """
         
         self.obstacle_tiles = set(layout["obstacle_tiles"])
@@ -153,6 +186,12 @@ class FogGridEnv(gym.Env):
         
 
     def _validate_layout(self) -> None:
+        """
+        Validation of initialization conditions for various constraints. Including density values,
+        position of start and goal tiles, etc.
+        
+        """
+        
         def in_bounds(pos: tuple[int, int]) -> bool:
             r, c = pos
             return 0 <= r < self.height and 0 <= c < self.width
@@ -198,6 +237,12 @@ class FogGridEnv(gym.Env):
             raise ValueError("tile cannot be an obstacle and a trap at the same time.")
 
     def _generate_random_map(self) -> None:
+        """
+        Generate a random configuration that has at least one reachable path from start to goal.
+        
+        """
+        
+        # keep iterating until a valid traversable map is found
         while True:
             # all available tiles: not start or goal tiles
             all_tiles = [
@@ -231,10 +276,15 @@ class FogGridEnv(gym.Env):
                 all_tiles[i] for i in trap_idx
             }
             
+            # check traversability
             if self._has_path_to_goal():
                 break
         
     def _has_path_to_goal(self) -> bool:
+        """
+        Check whether start and goal are traversable without being blocked by any obstacles
+        
+        """
         # BFS algorithm for finding if there's any path to the goal state
         queue = deque([self.start_pos])
         visited = {self.start_pos}
@@ -260,12 +310,17 @@ class FogGridEnv(gym.Env):
         return False
     
     def _get_local_view(self) -> tuple[int, ...]:
+        """
+        Return flattened matrix corresponding to the local view with all tile types around the agent
+        """
+        
         if self._agent_pos is None:
             raise RuntimeError
         
         ar, ac = self._agent_pos
         view = []
         
+        # scanning of local view
         for dr in range(-self.vision_radius, self.vision_radius+1):
             for dc in range(-self.vision_radius, self.vision_radius +1):
                 
@@ -289,6 +344,10 @@ class FogGridEnv(gym.Env):
         return tuple(view)
     
     def _is_blocked_step(self, pos: tuple[int, int], action: int) -> bool:
+        """
+        Return whether a movement would hit a boundary/obstacle
+        """
+        
         dr, dc = _DELTA[action]
         
         ori_r = pos[0] + dr
@@ -307,9 +366,15 @@ class FogGridEnv(gym.Env):
     
     def _pos_to_obs(self, pos: tuple[int, int]) -> int:
         """Row-major flattening: s = row * width + col."""
+        
+        # original indexing for standard tabular case
         return pos[0] * self.width + pos[1]
     
     def _get_obs(self):
+        """
+        Return current observation based on position or local view
+        """
+        
         if self._agent_pos is None:
             raise RuntimeError("Observation needed before reset")
         
@@ -337,6 +402,28 @@ class FogGridEnv(gym.Env):
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
     ):
+        """
+        Reset episode and return the initial observation
+        
+        
+        Parameters
+        ----------
+        seed : int, optional
+            Random seed
+        
+        options : dict, optional
+            unused
+            
+        Returns
+        -------
+        
+            obs
+                Initial observation
+        
+        """
+        
+        
+        
         super().reset(seed=seed)
 
         if self.randomize_map:
@@ -350,6 +437,29 @@ class FogGridEnv(gym.Env):
         return obs, {}
 
     def step(self, action: int) -> tuple[int, float, bool, bool, dict[str, Any]]:
+        """
+        Do one movement action and return the resulting transition.
+
+        Parameters
+        ----------
+        action : int
+            Movement action encoded respectively (up, down, left, right).
+
+        Returns
+        -------
+        observation
+            Observation after the action.
+        reward : float
+            Reward/penalty for the transition.
+        terminated : bool
+            Whether the goal was reached.
+        truncated : bool
+            Always False
+        info : dict
+            Additional information about the step
+        
+        """
+        
         if self._agent_pos is None:
             raise RuntimeError("step() called before reset().")
         
@@ -467,7 +577,7 @@ class FogGridEnv(gym.Env):
     
     def print_map(self) -> None:
         """
-        simple text representation of the map
+        Print a simple text representation of the map
         """
         for r in range(self.height):
             row = []

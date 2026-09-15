@@ -21,6 +21,31 @@ from rlc.utils.features import LocalQuadrantFeatures
         
 class LFAQLearningAgent:
     """
+    Q-learning agent using linear function approximation (LFA).
+
+    Agent represents each action with a vector of weights. A feature extractor maps
+    the current state to a feature vector, and Q-values are computed as the
+    dot product between those features and each action's weights.
+
+    Parameters
+    ----------
+    n_actions : int
+        Number of actions available to the agent.
+    feature_extractor : LocalQuadrantFeatures
+        Object that converts a state into a fixed-length feature vector
+    alpha : float
+        Learning rate used for the update.
+    gamma : float
+        Discount factor for future rewards.
+    epsilon_start : float
+        Initial exploration probability.
+    epsilon_min : float
+        Minimum value to which epsilon may decay.
+    epsilon_decay : float
+        Epsilon decay applied after each episode.
+    seed : int, optional
+        random seed
+        
     """
 
     def __init__(
@@ -61,7 +86,6 @@ class LFAQLearningAgent:
         # Internal RNG, separate from the environment's RNG.
         self._rng = np.random.default_rng(seed)
         
-        
         # instead of a tabular state-action, we record action x feature weights
         self.weights = np.zeros((
             self.n_actions,
@@ -79,6 +103,20 @@ class LFAQLearningAgent:
 
     def select_action(self, state: Hashable, *, greedy: bool = False) -> int:
         """
+        Choose an action using an epsilon-greedy policy
+
+        Parameters
+        ----------
+        state
+            Current environment state.
+        greedy : bool
+            If True, disable exploration and choose only among best actions.
+
+        Returns
+        -------
+        int
+            Index of the selected action.
+        
         """
         if not greedy and self._rng.random() < self.epsilon:
             return int(self._rng.integers(self.n_actions))
@@ -110,6 +148,7 @@ class LFAQLearningAgent:
         next_action: Optional[int] = None,  # this is made for compatibility with SARSA, ignored in Q-Learning
     ) -> None:
         """
+        Computation of the update and consequent weights
         """
         
         phi = self.feature_extractor(state)
@@ -143,12 +182,22 @@ class LFAQLearningAgent:
     # ---------------------------------------------------------------------
 
     def q_values(self, state) -> np.ndarray:
+        """
+        Return Q-values for every action for a specific state
+        """
+        
         return self._q_values(state)
 
     def state_values(self, state) -> float:
-        """"""
+        """
+        Return the estimated state value (in Q-learning is the max among all actions)
+        """
         return float(self._q_values(state).max())
         
     @property
     def n_features(self) -> int:
+        """
+        Number of features for the current feature class
+        """
+        
         return self.feature_extractor.n_features
