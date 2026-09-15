@@ -226,7 +226,8 @@ class LocalQuadrantFeatures:
                  height: int,
                  width: int,
                  vision_radius: int = 2,
-                 exp_decay: float = 1.0) -> None:
+                 exp_decay: float = 1.0,
+                 exact_view: bool = False) -> None:
         if vision_radius != 2:
             raise ValueError("vision radius must start at 2 tiles")
         
@@ -234,9 +235,16 @@ class LocalQuadrantFeatures:
         self.width = width
         self.vision_radius = vision_radius
         self.exp_decay = exp_decay
+        self.exact_view = bool(exact_view)
         
         # bias term, agent pos, features per quadrant (5 x 4)
-        self.n_features = 34
+        base_features = 32
+        exact_view_features = 0
+        # 5x5 square, for each 4 types of tiles
+        if self.exact_view:
+            exact_view_features = ((2*self.vision_radius+1)**2*4)
+        
+        self.n_features = base_features+ + exact_view_features
         
         # quadrants relative to the position of the agent
         
@@ -255,22 +263,16 @@ class LocalQuadrantFeatures:
         """
         """
         
-        agent_r = state[0]
-        agent_c = state[1]
-        
-        norm_r = agent_r/(self.height - 1)
-        norm_c = agent_c/(self.width - 1)
-        
         #check tiles
         
         # 5x5 square, 
         expected_tiles = (2*self.vision_radius+1)**2
         
-        if len(state[2:]) != expected_tiles:
+        if len(state) != expected_tiles:
             raise ValueError("expected tiles are not equal to given local view")
         
         # reconstruct the local view from a flattened matrix
-        local_view = np.asarray(state[2:], dtype = np.int64).reshape(5,5)
+        local_view = np.asarray(state, dtype = np.int64).reshape(2*self.vision_radius + 1, 2*self.vision_radius + 1)
         
         # blocked tiles (OOB)
         # remember, agent is in the (2,2) position in the squared local view
@@ -282,13 +284,14 @@ class LocalQuadrantFeatures:
         # bias + everything else
         features = [
             1.0,
-            norm_r,
-            norm_c,
             blocked_up,
             blocked_right,
             blocked_down,
             blocked_left
         ]
+        
+        if self.exact_view:
+            features.extend(self._exact_view_features(local_view))
         # quadrant features
         
         for list_offsets in self.quadrants.values():
@@ -330,7 +333,7 @@ class LocalQuadrantFeatures:
             obstacle_proximity_index = self._proximity_index(obstacle_distances)
             
             clear_path = self._clear_path(local_view, list_offsets)
-            open_path = self._open_tiles(agent_r, agent_c, list_offsets)
+            open_path = self._open_tiles(local_view, list_offsets)
             
             features.extend([trap_density,
                              obstacle_density,
@@ -361,7 +364,18 @@ class LocalQuadrantFeatures:
         
         return np.asarray(features, dtype=np.float64)
             
-                    
+    def _exact_view_features(self, local_view: np.ndarray) -> list[float]:
+        """
+        
+        """
+        
+        feature_matrix = []
+        
+        for tile in local_view.ravel():
+            feature_matrix.extend([float(tile == OBSTACLE), float(tile == TRAP),
+                                   float(tile == GOAL), float(tile == FOG)])
+        return feature_matrix
+        
                     
     def _proximity_index(self, distances: list[int]) -> float:
         """
@@ -425,10 +439,11 @@ class LocalQuadrantFeatures:
                 queue.append(next_tile)
         return 0.0
     
-    def _open_tiles(self, ar: int, ac: int, offsets: list[tuple[int,int]]) -> float:
+    def _open_tiles(self, local_view: np.ndarray, offsets: list[tuple[int,int]]) -> float:
         """
         """
         radius = self.vision_radius
+        
         limit_count = 0
         edge_count = 0
         
@@ -441,13 +456,12 @@ class LocalQuadrantFeatures:
             edge_count += 1
             
             # move in the same direction
-            step_r = 0 if dr == 0 else int(np.sign(dr))
-            step_c = 0 if dc == 0 else int(np.sign(dc))
+            view_r = radius + dr
+            view_c = radius + dc
             
-            check_r = ar + dr + step_r
-            check_c = ac + dc + step_c
+            tile = local_view[view_r, view_c]
             
-            if (0 <= check_r < self.height and 0<= check_c < self.width):
+            if tile not in (OBSTACLE, FOG):
                 limit_count += 1
                 
         if edge_count == 0:
