@@ -20,6 +20,30 @@ from typing import Hashable, Optional
         
 class LocalQLearningAgent:
     """
+    
+    Q-learning agent for local indexed state representations.
+
+    This implementation stores Q-values in a "defaultdict", which given position + local view
+    constitutes to a new key to this dictionary when encountered.
+
+    Parameters
+    ----------
+    n_actions : int
+        Number of actions available to the agent.
+    feature_extractor : LocalQuadrantFeatures
+        Object that converts a state into a fixed-length feature vector
+    alpha : float
+        Learning rate used for the update.
+    gamma : float
+        Discount factor for future rewards.
+    epsilon_start : float
+        Initial exploration probability.
+    epsilon_min : float
+        Minimum value to which epsilon may decay.
+    epsilon_decay : float
+        Epsilon decay applied after each episode.
+    seed : int, optional
+        random seed
     """
 
     def __init__(
@@ -74,6 +98,19 @@ class LocalQLearningAgent:
 
     def select_action(self, state: Hashable, *, greedy: bool = False) -> int:
         """
+        Choose an action using an epsilon-greedy policy
+        
+        Parameters
+        ----------
+        state
+            Current environment state.
+        greedy : bool
+            If True, disable exploration and choose only among best actions.
+
+        Returns
+        -------
+        int
+            Index of the selected action.
         """
         if not greedy and self._rng.random() < self.epsilon:
             return int(self._rng.integers(self.n_actions))
@@ -112,6 +149,7 @@ class LocalQLearningAgent:
         next_action: Optional[int] = None,  # this is made for compatibility with SARSA, ignored in Q-Learning
     ) -> None:
         """
+        Computation of the update and consequent weights
         """
         bootstrap = 0.0 if terminated else float(self.Q[next_state].max())
         
@@ -134,14 +172,18 @@ class LocalQLearningAgent:
     # ---------------------------------------------------------------------
 
     def greedy_policy(self) -> dict[Hashable, int]:
-        """"""
+        """
+        Return Q-values for every action for a specific state
+        """
         return {
             state: self._argmax_random_tiebreak(q_values)
             for state, q_values in self.Q.items()
         }
 
     def state_values(self) -> dict[Hashable, float]:
-        """"""
+        """
+        Return the estimated state value (in Q-learning is the max among all actions)
+        """
         return {
         state: float(q_values.max())
         for state, q_values in self.Q.items()
@@ -149,4 +191,7 @@ class LocalQLearningAgent:
         
     @property
     def n_visited_states(self) -> int:
+        """
+        Number of total visited states
+        """
         return len(self.Q)

@@ -219,7 +219,30 @@ class RBFFeatures:
         return feat
 
 class LocalQuadrantFeatures:
-    """
+    """Extract features from a square local grid (local view) around an agent.
+    The local observation is divided into four directional quadrants, described visually in the project's report.
+    For each quadrant, the extractor summarizes dangers around the agent and whether
+    useful paths remain open. It also checks immediately blocked directions and
+    the relative position of a visible goal.
+
+    Parameters
+    ----------
+    height : int
+        Height of the environment grid.
+    width : int
+        Width of the environment grid.
+    vision_radius : int
+        Radius of the square local observation (currently only 2 tiles of radius is supported)
+    exp_decay : float
+        Exponential decay controlling how quickly hazard proximity decreases
+        with distance (defaults to 1.0)
+    exact_view : bool
+        If True, append one-hot features describing every visible tile inside the local view
+
+    Attributes
+    ----------
+    n_features : int
+        Total number of features produced by the extractor.
     """
     
     def __init__(self,
@@ -341,7 +364,7 @@ class LocalQuadrantFeatures:
                              obstacle_proximity_index,
                              clear_path, open_path])
             
-        # goal in view
+        # goal in view features
         
         goal_positions = np.argwhere(local_view == GOAL)
         
@@ -366,6 +389,18 @@ class LocalQuadrantFeatures:
             
     def _exact_view_features(self, local_view: np.ndarray) -> list[float]:
         """
+        Computes exact tile types of the local view and returns it as a one-hot list
+
+        Parameters
+        ----------
+        local_view : list of lists
+            Matrix view of the local view
+            
+        Returns
+        -------
+        
+        feature_matrix: list of lists
+            One-hot representation of the local view
         
         """
         
@@ -379,6 +414,18 @@ class LocalQuadrantFeatures:
                     
     def _proximity_index(self, distances: list[int]) -> float:
         """
+        
+        Computes proximity index features based on the distance from the agent to different dangers
+        
+        Parameters
+        ----------
+        distances : list of ints
+            List of the Manhattan distances from the agent to all dangers within a quadrant
+            
+        Returns
+        -------
+            (float) Proximity index based on distances
+                
         """
         
         if not distances:
@@ -395,6 +442,22 @@ class LocalQuadrantFeatures:
                 
     def _clear_path(self, local_view: np.ndarray, offsets: list[tuple[int,int]]) -> float:
         """
+        Check whether there's a traversable path reaching the edge of a quadrant.
+        A breadth-first search (BFS) starts at the agent and moves only through
+        tiles belonging to the selected quadrant.
+
+        Parameters
+        ----------
+        local_view : np.ndarray
+            Matrix view of the local view
+        offsets : list of tuple of int
+            Coordinates of the quadrant relative to the agent.
+
+        Returns
+        -------
+        float
+            1.0 if an unblocked route reaches a quadrant edge, otherwise 0.0.
+        
         """
         
         # position of the agent in local view
@@ -441,6 +504,20 @@ class LocalQuadrantFeatures:
     
     def _open_tiles(self, local_view: np.ndarray, offsets: list[tuple[int,int]]) -> float:
         """
+        Measure how much of a quadrant's boundary is traversable.
+
+        Parameters
+        ----------
+        local_view : np.ndarray
+            Matrix view of the local view
+        offsets : list of tuple of int
+            Coordinates belonging to the selected quadrant.
+
+        Returns
+        -------
+        float
+            Fraction of outer tiles that are neither obstacles nor fog.
+        
         """
         radius = self.vision_radius
         

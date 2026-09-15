@@ -59,8 +59,17 @@ class TrainingHistory:
     eval_std_returns : list of float
         Standard deviation of the return over the evaluation batch.
     eval_success_rate : list of float
-        Value of the proportion of successful runs (agent reached the goal state)
-    eval_mean_len: 
+        Value of the proportion of successful runs (agent reached the goal state) during evaluation
+    eval_mean_len: list of float
+        Mean number of steps per evaluation episode
+    eps_successess : list of float
+        Value of the proportion of successful runs during training
+    eval_maps : list of dict, optional
+        Fixed layouts used for evaluation, or None for randomized training
+    eval_map_returns : list of list of float
+        Evaluation returns recorded at every evaluation step
+    eval_map_success : list of list of float
+        Individual success indicators for every evaluation point
     
     """
 
@@ -82,13 +91,25 @@ def generate_eval_maps(env: gym.Env,
                        n_maps: int,
                        *,
                        seed: Optional[int] = None) -> list[dict]:
-    """
-    """
+    """Produce a set of environments for evaluation, given a reusable random seed.
     
+    Parameters
+    ----------
+    env : gymnasium.Env
+        Environment object providing attributes
+    n_maps : int
+        Number of maps to generate
+    seed : int, optional
+        Seed for the reset
+    
+    Returns
+    -------
+    list of dict
+        Layout descriptions returned by the environment
+    
+    """
+
     env = getattr(env, "unwrapped", env)
-    
-    if not hasattr(env, "get_layout"):
-        raise ValueError("Has to have get_layout to retrieve a fixed eval set")
     
     maps = []
     
@@ -124,6 +145,9 @@ def evaluate(
         Hard cap on the number of steps per evaluation episode, to guard
         against pathological cases where the greedy policy never terminates.
         ``None`` (default) means unbounded.
+    eval_maps : list of dict, optional
+        Fixed layouts to change through during evaluation. If None, the environment generates/reset 
+        maps normally
     seed : int, optional
         Seed used for the *first* environment reset of the evaluation batch.
         Subsequent resets advance the same RNG, producing a deterministic
@@ -137,12 +161,19 @@ def evaluate(
         Standard deviation of the per-episode returns over the batch.
     returns : np.ndarray
         Array of shape ``(n_episodes,)`` with the individual returns.
+    success_rate : float
+        Proportion of evaluation episodes that reached the goal
+    mean_length : float
+        Mean number of steps taken per evaluation episode.
+    success : np.ndarray
+        Array containing 1.0 for successful episodes and 0.0 otherwise.
     """
     returns = np.zeros(n_episodes, dtype=np.float64)
     lens = np.zeros(n_episodes, dtype = np.int64)
     success = np.zeros(n_episodes, dtype=np.float64)
 
     for ep in range(n_episodes):
+        # if input, then eval on fixed maps, if not, reset each episode
         if eval_maps is None:
             obs, _ = env.reset(seed=seed if ep == 0 else None)
         else:
@@ -157,6 +188,8 @@ def evaluate(
             
             base_env.randomize_map = orand
         
+        
+        # run episode
         ep_return = 0.0
         steps = 0
         while True:
@@ -168,9 +201,10 @@ def evaluate(
                 break
             if max_steps is not None and steps >= max_steps:
                 break
+        # save everything and return it later
         returns[ep] = ep_return
         lens[ep] = steps
-        success[ep] = float(terminated) # since true/false converts to 1 or 0
+        success[ep] = float(terminated) # since true/false converts to 1 or 0 when type changed
 
     return float(returns.mean()), float(returns.std()), returns, float(success.mean()), float(lens.mean()), success
 
@@ -215,6 +249,10 @@ def train(
         independent of the training RNG.
     eval_max_steps : int, optional
         Hard cap on the steps per evaluation episode.
+    eval_map_setting : {"random", "fixed"}
+        Whether evaluation is chosen for randomized layouts or a fixed set.
+    eval_map_seed : int, optional
+        Seed used when generating the fixed evaluation layouts.
     seed : int, optional
         Seed for the training environment's *first* reset.
     progress : bool
@@ -234,6 +272,7 @@ def train(
 
     fixed_eval_maps = None
     
+    # when fixed, generate episodes based on provided eval map seed
     if eval_map_setting == "fixed":
         fixed_eval_maps = generate_eval_maps(eval_env, n_maps = eval_episodes, seed = eval_map_seed)
     iterator = range(n_episodes)
@@ -244,7 +283,7 @@ def train(
             from tqdm.auto import tqdm
             iterator = tqdm(iterator, desc="Training", unit="ep")
         except ImportError:
-            pass  # tqdm not installed; silently fall back to plain range
+            pass
 
     for ep in iterator:
         obs, _ = env.reset(seed=seed if ep == 0 else None)
